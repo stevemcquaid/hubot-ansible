@@ -1,0 +1,26 @@
+; Hubot systemd service unit file
+; Place in: `/etc/systemd/system/hubot.service`, then `systemctl daemon-reload` and `service hubot start`
+
+[Unit]
+Description=Hubot
+Requires=network.target
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/{{ansible_user_id}}/{{ REPO_NAME }}
+StandardOutput=syslog
+SyslogIdentifier=hubot
+User=root
+
+Restart=always
+RestartSec=30
+
+; Configure Hubot environment variables, make sure to use quotes around whitespace as shown below.
+Environment=PATH=node_modules/.bin:node_modules/hubot/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/root/bin
+EnvironmentFile=-/etc/sysconfig/hubot_env.config
+
+ExecStart=/home/{{ansible_user_id}}/{{ REPO_NAME }}/bin/hubot --adapter slack --name $HUBOT_NAME
+
+[Install]
+WantedBy=multi-user.target

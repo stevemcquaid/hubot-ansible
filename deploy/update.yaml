@@ -1,0 +1,85 @@
+#!/usr/bin/env ansible-playbook
+---
+#
+# Use this playbook to update hubot
+#
+# This playbook supports the following variables:
+# REPO_NAME - Name of repo containing this code (REQUIRED)
+# SYNC_ABS_PATH - Path to the root of the code. (REQUIRED)
+# HUBOT_LOG_LEVEL - Log level to run hubot at (REQUIRED)
+# HUBOT_SLACK_TOKEN - Access token for hubot to connect to slack (REQUIRED)
+# REMOTE_USER_VAR - User to ssh into on remote (REQUIRED)
+# HUBOT_NAME - Name of the bot (REQUIRED)
+# Example:
+#   To run the playbook:
+#   ansible-playbook update.yaml -i hosts --extra-vars "HUBOT_LOG_LEVEL=debug HUBOT_SLACK_TOKEN=<some-really-long-string> HOME_FOLDER=<HOME_FOLDER> SYNC_ABS_PATH=</some/path/to/code? REPO_NAME=<REPO-NAME> HUBOT_NAME=<HUBOT_NAME>" -k -K
+#
+
+- hosts: all
+  tasks:
+      - name: Copy pubkey
+        authorized_key: user={{ ansible_user_id }} key="{{ lookup('file', '~/.ssh/id_rsa.pub') }}"
+      - name: Update yum
+        command: yum -y update
+        sudo: yes
+      - name: Install Devtools
+        command: yum -y groupinstall 'Development tools'
+        sudo: yes
+      - name: Install EPEL
+        command: yum install -y epel-release
+        sudo: yes
+      - name: Install nodejs npm
+        command: yum install -y nodejs npm redis nano
+        sudo: yes
+      - name: systemctl start redis
+        command: systemctl start redis
+        sudo: yes
+      - name: systemctl enable redis
+        command: systemctl enable redis
+        sudo: yes
+      - name: npm install coffee-script
+        command: npm install coffee-script hubot
+        sudo: yes
+        #
+        # Non-bootstrap/install stuff starts here
+        #
+      - name: Delete repo
+        command: rm -rf /home/{{ ansible_user_id }}/{{ REPO_NAME }}
+        sudo: yes
+      - name: Copy the code
+        synchronize:
+          src: "{{ SYNC_ABS_PATH }}/"
+          dest: "/home/{{ ansible_user_id }}/{{ REPO_NAME }}"
+          delete: yes
+          rsync_opts:
+            - "--no-motd"
+            - "--exclude-from={{ SYNC_ABS_PATH }}/.gitignore"
+
+      - name: Install NPM
+        command: cd /home/{{ ansible_user_id }}/{{ REPO_NAME }} && npm install
+        sudo: yes
+      - name: Generate hubot_env.config file
+        template: src=templates/hubot_env.config.j2 dest=/etc/sysconfig/hubot_env.config owner={{ ansible_user_id }} group=root mode=0755
+        sudo: yes
+      - name: Generate systemd file
+        template: src=templates/hubot.service.j2 dest=/etc/systemd/system/hubot.service owner={{ ansible_user_id }} group=root mode=0755
+        sudo: yes
+        notify:
+          - reload systemd
+      - name: systemctl enable hubot.service
+        command: systemctl enable hubot.service
+        sudo: yes
+      - name: systemctl restart hubot.service
+        command: systemctl restart hubot.service
+        sudo: yes
+      - name: Generate cron reloader
+        template: src=templates/hubot-restart.cron.j2 dest=/etc/cron.d/hubot-restart owner=root group=root mode=0755
+        sudo: yes
+  handlers:
+    - name: restart hubot.service
+      service: name=hubot.service state=restarted
+    - name: reload systemd
+      sudo: yes
+      command: systemctl daemon-reload
+    - name: restart sshd
+      service: name=sshd state=restarted
